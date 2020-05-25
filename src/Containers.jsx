@@ -75,7 +75,6 @@ class Containers extends React.Component {
     }
 
     startContainer(container) {
-        console.log("Start Container");
         utils.podmanCall("StartContainer", { name: container.names }, container.isSystem)
                 .catch(ex => {
                     const error = cockpit.format(_("Failed to start container $0"), container.names);
@@ -85,7 +84,6 @@ class Containers extends React.Component {
     }
 
     restartContainer (container, force) {
-        console.log("ReStart Container");
         const args = { name: container.names };
 
         if (force)
@@ -98,7 +96,7 @@ class Containers extends React.Component {
                 });
     }
 
-    renderRow(containersStats, container) {
+    renderRow(containersStats, container, containerInspectionData) {
         const containerStats = containersStats[container.id + container.isSystem.toString()];
         const isRunning = container.status == "running";
         const image = container.image;
@@ -122,7 +120,8 @@ class Containers extends React.Component {
         const tabs = [{
             name: _("Details"),
             renderer: ContainerDetails,
-            data: { container: container }
+            // data: { container: container }
+            data: { containerInspectionData: containerInspectionData }
         }, {
             name: _("Logs"),
             renderer: ContainerLogs,
@@ -260,7 +259,9 @@ class Containers extends React.Component {
             return this.props.containers[a].names > this.props.containers[b].names ? 1 : -1;
         });
 
-        const rows = filtered.map(id => this.renderRow(containersStats, this.props.containers[id]));
+        // const rows = filtered.map(id => this.renderRow(containersStats, this.props.containers[id]));
+        const rows = filtered.map(id =>
+            this.renderRow(containersStats, this.props.containers[id], this.props.containersInspectionData[id]));
         const containerDeleteModal =
             <ContainerDeleteModal
                 selectContainerDeleteModal={this.state.selectContainerDeleteModal}

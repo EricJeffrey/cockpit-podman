@@ -49,6 +49,7 @@ class Application extends React.Component {
             systemImagesLoaded: false,
             containers: null,
             containersStats: {},
+            containersInspectionData: {},
             userContainersLoaded: null,
             systemContainersLoaded: null,
             userServiceExists: false,
@@ -154,6 +155,9 @@ class Application extends React.Component {
     updateContainersAfterEvent(system) {
         utils.podmanCall("ListContainers", {}, system)
                 .then(reply => {
+                    for (const container of reply.containers || []) {
+                        this.updateContainerInspectionData(container.names, system);
+                    }
                     this.setState(prevState => {
                         // Copy only containers that could not be deleted with this event
                         // So when event from system come, only copy user containers and vice versa
@@ -205,9 +209,17 @@ class Application extends React.Component {
                 });
     }
 
-    // todo Jeffrey: Not triggered?
+    updateContainerInspectionData(id, system) {
+        utils.podmanCall("InspectContainer", { name: id }, system)
+                .then(reply => {
+                    const containerInspectionData = JSON.parse(reply.container);
+                    containerInspectionData.isSystem = system;
+                    this.updateState("containersInspectionData", containerInspectionData.Id + system.toString(), containerInspectionData);
+                })
+                .catch(e => console.log(e));
+    }
+
     updateContainerAfterEvent(id, system) {
-        console.log("updateContainerAfterEvent, id: " + id);
         utils.podmanCall("GetContainer", { id: id }, system)
                 .then(reply => {
                     reply.container.isSystem = system;
@@ -255,6 +267,7 @@ class Application extends React.Component {
     }
 
     handleContainerEvent(event, system) {
+        console.log("handleContainerEvent, event.status: " + event.status);
         switch (event.status) {
         /* The following events do not need to trigger any state updates */
         case 'attach':
@@ -269,15 +282,18 @@ class Application extends React.Component {
          * We do get the container affected in the event object but for
          * now we 'll do a batch update
          */
-        case 'checkpoint':
         case 'create':
+        case 'start':
+            this.updateContainerInspectionData(event.id, system);
+            this.updateContainerAfterEvent(event.id, system);
+            break;
+        case 'checkpoint':
         case 'died':
         case 'kill':
         case 'mount':
         case 'pause':
         case 'prune':
         case 'restore':
-        case 'start':
         case 'stop':
         case 'sync':
         case 'unmount':
@@ -314,10 +330,8 @@ class Application extends React.Component {
     startTimer(system) {
         if (this.containerStatTimer == undefined) {
             this.containerStatTimer = setInterval(() => {
-                // todo - jeffrey: check system arg
                 this.updateContainersAfterEvent(system);
             }, 1000);
-            // console.log("startTimer: timer started");
         }
     }
 
@@ -514,6 +528,7 @@ class Application extends React.Component {
                 key="containerList"
                 version={this.state.version}
                 containers={this.state.systemContainersLoaded && this.state.userContainersLoaded ? this.state.containers : null}
+                containersInspectionData={this.state.systemContainersLoaded && this.state.userContainersLoaded ? this.state.containersInspectionData : null}
                 containersStats={this.state.containersStats}
                 onlyShowRunning={this.state.onlyShowRunning}
                 textFilter={this.state.textFilter}
