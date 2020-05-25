@@ -75,6 +75,7 @@ class Containers extends React.Component {
     }
 
     startContainer(container) {
+        console.log("Start Container");
         utils.podmanCall("StartContainer", { name: container.names }, container.isSystem)
                 .catch(ex => {
                     const error = cockpit.format(_("Failed to start container $0"), container.names);
@@ -84,6 +85,7 @@ class Containers extends React.Component {
     }
 
     restartContainer (container, force) {
+        console.log("ReStart Container");
         const args = { name: container.names };
 
         if (force)
@@ -104,7 +106,8 @@ class Containers extends React.Component {
         let proc = "";
         let mem = "";
         if (containerStats) {
-            proc = containerStats.cpu ? utils.format_cpu_percent(containerStats.cpu * 100) : <abbr title={_("not available")}>{_("n/a")}</abbr>;
+            // proc = containerStats.cpu ? utils.format_cpu_percent(containerStats.cpu * 100) : <abbr title={_("not available")}>{_("n/a")}</abbr>;
+            proc = containerStats.cpu_percent != undefined ? utils.format_cpu_percent(containerStats.cpu_percent * 100) : <abbr title={_("not available")}>{_("n/a")}</abbr>;
             mem = containerStats.mem_usage ? utils.format_memory_and_limit(containerStats.mem_usage, containerStats.mem_limit) : <abbr title={_("not available")}>{_("n/a")}</abbr>;
         }
         const columns = [

@@ -108,11 +108,28 @@ class Application extends React.Component {
         });
     }
 
+    // extract cpu percent from containersStats
+    getCpuPercentInState(prevState, newValue, state, id) {
+        if (prevState != undefined && newValue != undefined && newValue != -1) {
+            newValue.cpu_percent = 0;
+            if (prevState && prevState[state] && prevState[state][id]) {
+                const oldValue = prevState[state][id];
+                newValue.cpu_percent = (newValue.cpu_nano - oldValue.cpu_nano) / (newValue.system_nano - oldValue.system_nano);
+            }
+        }
+        return newValue;
+    }
+
     updateState(state, id, newValue) {
         this.setState(prevState => {
+            if (state == "containersStats")
+                newValue = this.getCpuPercentInState(prevState, newValue, state, id);
+
             const copyState = Object.assign({}, prevState[state]);
 
             copyState[id] = newValue;
+
+            // console.log("updateState: state: " + state + ", newValue: " + JSON.stringify(newValue));
 
             return {
                 [state]: copyState,
@@ -188,7 +205,9 @@ class Application extends React.Component {
                 });
     }
 
+    // todo Jeffrey: Not triggered?
     updateContainerAfterEvent(id, system) {
+        console.log("updateContainerAfterEvent, id: " + id);
         utils.podmanCall("GetContainer", { id: id }, system)
                 .then(reply => {
                     reply.container.isSystem = system;
@@ -291,6 +310,22 @@ class Application extends React.Component {
         }
     }
 
+    // start a timer to get container stats automatically
+    startTimer(system) {
+        if (this.containerStatTimer == undefined) {
+            this.containerStatTimer = setInterval(() => {
+                // todo - jeffrey: check system arg
+                this.updateContainersAfterEvent(system);
+            }, 1000);
+            // console.log("startTimer: timer started");
+        }
+    }
+
+    // stop timer
+    stopTimer() {
+        this.containerStatTimer && clearInterval(this.containerStatTimer);
+    }
+
     init(system) {
         utils.podmanCall("GetVersion", {}, system)
                 .then(reply => {
@@ -305,6 +340,7 @@ class Application extends React.Component {
                                   },
                                   system
                     );
+                    this.startTimer(system);
                 })
                 .catch(error => {
                     if (error.name === "ConnectionClosed") {
@@ -327,6 +363,10 @@ class Application extends React.Component {
                     this.init(false);
                 })
                 .fail(e => console.log("Could not read $XDG_RUNTIME_DIR: ", e.message));
+    }
+
+    componentWillUnmount() {
+        this.stopTimer();
     }
 
     checkUserService() {
