@@ -636,8 +636,16 @@ class TestApplication(testlib.MachineCase):
         self.login_and_go("/podman", authorized=False, superuser=False)
         b.click("#app .pf-c-empty-state button.pf-m-primary")
 
-        b.wait_present("#containers-containers")
-        b.wait_not_present("#overview div.pf-c-alert")
+        # HACK: https://github.com/containers/libpod/issues/6660
+        # Try to click on the button bunch of times due to the aforementioned bug
+        with b.wait_timeout(8):
+            for _ in range(5):
+                try:
+                    b.wait_present("#containers-containers")
+                    b.wait_not_present("#overview div.pf-c-alert")
+                except testlib.Error:
+                    b.click("#app .pf-c-empty-state button.pf-m-primary")
+
         is_active_system("inactive")
         is_active_user("active")
         is_enabled_user("enabled")
@@ -645,6 +653,7 @@ class TestApplication(testlib.MachineCase):
 
         self.allow_restart_journal_messages()
         self.allow_authorize_journal_messages()
+        self.allow_journal_messages(".*podman/podman.sock/.*: couldn't connect:.*")
 
     def testRunImageSystem(self):
         self._testRunImage(True)

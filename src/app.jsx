@@ -205,6 +205,16 @@ class Application extends React.Component {
                                 return { containersStats: copyStats };
                             });
                         }
+                    } else {
+                        // HACK: Sometimes we don't get 'remove' event when container is removed
+                        // https://github.com/containers/libpod/issues/6664
+                        if (id) {
+                            this.setState(prevState => {
+                                const copyStats = Object.assign({}, prevState.containers);
+                                delete copyStats[id + system.toString()];
+                                return { containers: copyStats };
+                            });
+                        }
                     }
                 })
                 .catch(e => console.log(e));
