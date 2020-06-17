@@ -3,6 +3,9 @@
 # The application RPM will be installed separately
 set -eu
 
+dnf -y --enablerepo=updates-testing update podman
+rpm -q podman
+
 systemctl enable cockpit.socket podman.socket
 
 # don't force https:// (self-signed cert)
