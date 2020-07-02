@@ -3,12 +3,10 @@
 # The application RPM will be installed separately
 set -eu
 
-# HACK - see https://github.com/containers/libpod/commit/59353b4dce692df0fb22a15427abbaafad58050e
-if [ -f /usr/lib/systemd/user/io.podman.socket ]; then
-    sed -i '/^Also/d' /usr/lib/systemd/user/io.podman.socket
-fi
+dnf -y --enablerepo=updates-testing update podman
+rpm -q podman
 
-systemctl enable cockpit.socket io.podman.socket
+systemctl enable cockpit.socket podman.socket
 
 # don't force https:// (self-signed cert)
 printf "[WebService]\\nAllowUnencrypted=true\\n" > /etc/cockpit/cockpit.conf
