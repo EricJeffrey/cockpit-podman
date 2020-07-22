@@ -14,3 +14,4 @@ test/images/
 *.pot
 POTFILES*
 tmp/weblate-repo
+.vscode/

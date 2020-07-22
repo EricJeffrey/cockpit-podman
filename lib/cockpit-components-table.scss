@@ -87,6 +87,7 @@
             vertical-align: top;
             // Not every browser supports text-top, so define top (above) as a fallback
             vertical-align: text-top;
+            outline: none;
         }
     }
 

@@ -13,7 +13,7 @@ export function format_memory_and_limit(usage, limit) {
     if (usage === undefined || isNaN(usage))
         return "";
 
-    usage = usage / 1073741824; // 1024^3
+    // usage = usage / 1073741824; // 1024^3
     limit = limit / 1073741824;
     var mtext = "";
     var units = 1024;
@@ -21,13 +21,13 @@ export function format_memory_and_limit(usage, limit) {
     if (limit) {
         parts = cockpit.format_bytes(limit, units, true);
         mtext = " / " + parts.join(" ");
-        units = parts[1];
+        // units = parts[1];
     }
 
     if (usage) {
         parts = cockpit.format_bytes(usage, units, true);
         if (mtext)
-            return _(parts[0] + mtext);
+            return _(parts.join(" ") + mtext);
         else
             return _(parts.join(" "));
     } else {
