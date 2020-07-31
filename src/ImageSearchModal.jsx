@@ -1,8 +1,8 @@
 import React from 'react';
 import { ListGroup, ListGroupItem, Modal } from 'patternfly-react';
-import { Button, InputGroup, InputGroupText } from '@patternfly/react-core';
-import { SearchIcon } from '@patternfly/react-icons';
+import { Button, InputGroup } from '@patternfly/react-core';
 
+import * as Select from '../lib/cockpit-components-select.jsx';
 import { ErrorNotification } from './Notification.jsx';
 import cockpit from 'cockpit';
 import rest from './rest.js';
@@ -22,6 +22,7 @@ export class ImageSearchModal extends React.Component {
             searchInProgress: false,
             searchFinished: false,
             isSystem: props.systemServiceAvailable,
+            registry: "",
         };
         this.onDownloadClicked = this.onDownloadClicked.bind(this);
         this.onItemSelected = this.onItemSelected.bind(this);
@@ -72,12 +73,16 @@ export class ImageSearchModal extends React.Component {
         this.setState({ searchInProgress: true });
 
         this.activeConnection = rest.connect(client.getAddress(this.state.isSystem), this.state.isSystem);
+
+        const rr = this.state.registry;
+        const registry = rr.length < 1 || rr[rr.length - 1] === "/" ? rr : rr + "/";
+
         const options = {
             method: "GET",
             path: "/v1.12/libpod/images/search",
             body: "",
             params: {
-                term: this.state.imageIdentifier,
+                term: registry + this.state.imageIdentifier,
             },
         };
         this.activeConnection.call(options)
@@ -120,43 +125,68 @@ export class ImageSearchModal extends React.Component {
             <>
                 { this.props.userServiceAvailable && this.props.systemServiceAvailable &&
                     <form className="ct-form">
-                        <label className="control-label" htmlFor="as-user">{_("Download as:")}</label>
+                        <label className="control-label" htmlFor="as-user">{_("Owner")}</label>
                         <fieldset id="as-user">
-                            <input type="radio" value="system" id="system" onChange={this.onToggleUser} checked={this.state.isSystem} />
-                            <label className="radio" htmlFor="system">{_("System")}</label>
-                            <input type="radio" value="user" id="user" onChange={this.onToggleUser} checked={!this.state.isSystem} />
-                            <label className="radio" htmlFor="user">{this.props.user.name}</label>
+                            <div className="radio">
+                                <label>
+                                    <input type="radio" value="system" id="system" onChange={this.onToggleUser} checked={this.state.isSystem} />
+                                    {_("system")}
+                                </label>
+                                <label>
+                                    <input type="radio" value="user" id="user" onChange={this.onToggleUser} checked={!this.state.isSystem} />
+                                    {this.props.user.name}
+                                </label>
+                            </div>
                         </fieldset>
                     </form>
                 }
                 <InputGroup>
-                    <InputGroupText id="username" aria-label={_("Search")}>
-                        <SearchIcon />
-                    </InputGroupText>
-                    <input id='search-image-dialog-name'
-                        autoFocus
-                        className='form-control'
-                        type='text'
-                        placeholder={_("Search by name or description")}
-                        value={this.state.imageIdentifier}
-                        onKeyPress={this.onKeyPress}
-                        onChange={e => this.onValueChanged('imageIdentifier', e.target.value)} />
+                    <div className="ct-form">
+                        <label htmlFor="search-image-dialog-name" className="control-label">{_("Search for")}</label>
+                        <input id='search-image-dialog-name'
+                            autoFocus
+                            className='form-control ct-form-split'
+                            type='text'
+                            placeholder={_("Search by name or description")}
+                            value={this.state.imageIdentifier}
+                            onKeyPress={this.onKeyPress}
+                            onChange={e => this.onValueChanged('imageIdentifier', e.target.value)} />
+                        <label htmlFor="registry-select" aria-label="Registry" className="control-label">{_("in")}</label>
+                        <div className="ct-form-split">
+                            <Select.Select id='registry-select'
+                                initial={this.state.registry}
+                                // Why isn't it taking on this class?!
+                                className='ct-form-split'
+                                onChange={value =>
+                                    this.setState({ registry: value }, () => this.onSearchTriggered(false))
+                                }>
+                                <Select.SelectEntry data="" key="all">
+                                    {_("All registries")}
+                                </Select.SelectEntry>
+                                {(this.props.registries.search || []).map(r => {
+                                    return <Select.SelectEntry data={r} key={r}>
+                                        {r}
+                                    </Select.SelectEntry>;
+                                })
+                                }
+                            </Select.Select>
+                        </div>
+                    </div>
                 </InputGroup>
 
                 {this.state.searchInProgress && <div id='search-image-dialog-waiting' className='spinner' />}
 
                 {this.state.searchFinished && !this.state.imageIdentifier == '' && <>
-                    <h5> {_("Images")} </h5>
-                    {this.state.imageList.length == 0 && <div> {cockpit.format(_("No results for $0. Please retry another term."), this.state.imageIdentifier)} </div>}
+                    {this.state.imageList.length == 0 && <div className="no-results"> {cockpit.format(_("No results for $0. Please retry another term."), this.state.imageIdentifier)} </div>}
                     {this.state.imageList.length > 0 && <ListGroup>
                         {this.state.imageList.map((image, iter) => {
                             return (
                                 <ListGroupItem active={this.state.selected == iter} onClick={() => this.onItemSelected(iter)} key={iter}>
                                     <span className='image-list-item'>
-                                        <label className='control-label'>
+                                        <label className='image-name control-label'>
                                             { image.Name }
                                         </label>
-                                        <span className='pull-right'> { image.Description } </span>
+                                        <span className='image-description'> { image.Description } </span>
                                     </span>
                                 </ListGroupItem>
                             );
@@ -170,7 +200,7 @@ export class ImageSearchModal extends React.Component {
             <Modal show onHide={this.props.close} className="podman-search">
                 <Modal.Header>
                     <Modal.CloseButton onClick={this.props.close} />
-                    <Modal.Title> {_("Search Image")} </Modal.Title>
+                    <Modal.Title> {_("Search for an image")} </Modal.Title>
                 </Modal.Header>
                 <Modal.Body>
                     {defaultBody}
@@ -182,7 +212,7 @@ export class ImageSearchModal extends React.Component {
                         <input className="form-control image-tag-entry"
                                id="image-search-tag"
                                type='text'
-                               placeholder={_("Tag")}
+                               placeholder="latest"
                                value={this.state.imageTag || ''}
                                onChange={e => this.onValueChanged('imageTag', e.target.value)} />
                     </div>

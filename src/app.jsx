@@ -177,9 +177,29 @@ class Application extends React.Component {
                 .catch(e => console.log(e));
     }
 
+    isContainerCheckpointPresent(id, system) {
+        return client.inspectContainer(system, id)
+                .then(inspectResult => {
+                    const checkpointPath = inspectResult.StaticDir + "/checkpoint";
+                    return cockpit.script(`test -d ${checkpointPath}; echo $?`, [],
+                                          system ? { superuser: "require" } : {});
+                })
+                .then(scriptResult => scriptResult === "0\n");
+    }
+
     updateContainersAfterEvent(system, init) {
         this.updateDiskUsageAfterEvent();
         client.getContainers(system)
+                .then(reply => Promise.all(
+                    (reply || []).map(container =>
+                        this.isContainerCheckpointPresent(container.Id, system)
+                                .then(checkpointPresent => {
+                                    const newContainer = Object.assign({}, container);
+                                    newContainer.hasCheckpoint = checkpointPresent;
+                                    return newContainer;
+                                })
+                    )
+                ))
                 .then(reply => {
                     this.setState(prevState => {
                         // Copy only containers that could not be deleted with this event
@@ -240,6 +260,16 @@ class Application extends React.Component {
 
     updateContainerAfterEvent(id, system) {
         client.getContainers(system, id)
+                .then(reply => Promise.all(
+                    (reply || []).map(container =>
+                        this.isContainerCheckpointPresent(container.Id, system)
+                                .then(checkpointPresent => {
+                                    const newContainer = Object.assign({}, container);
+                                    newContainer.hasCheckpoint = checkpointPresent;
+                                    return newContainer;
+                                })
+                    )
+                ))
                 .then(reply => {
                     if (reply && reply.length > 0) {
                         reply = reply[0];
@@ -353,8 +383,10 @@ class Application extends React.Component {
         client.getInfo(system)
                 .then(reply => {
                     this.setState({
-                        [system ? "systemServiceAvailable" : "userServiceAvailable"]: true, version: reply.ServerVersion,
-                        hostCpus: reply.NCPU
+                        [system ? "systemServiceAvailable" : "userServiceAvailable"]: true,
+                        version: reply.version.Version,
+                        registries: reply.registries,
+                        hostCpus: reply.host.cpus,
                     });
                     this.updateImagesAfterEvent(system);
                     this.updateContainersAfterEvent(system, true);
@@ -545,6 +577,7 @@ class Application extends React.Component {
                 user={permission.user || _("user")}
                 userServiceAvailable={this.state.userServiceAvailable}
                 systemServiceAvailable={this.state.systemServiceAvailable}
+                registries={this.state.registries}
             />;
         const containerList =
             <Containers

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Button } from '@patternfly/react-core';
-import { PlusCircleIcon } from '@patternfly/react-icons';
+import { PlusIcon } from '@patternfly/react-icons';
 
 import cockpit from 'cockpit';
 import { ListingTable } from "../lib/cockpit-components-table.jsx";
@@ -9,7 +9,7 @@ import ImageDetails from './ImageDetails.jsx';
 import ImageUsedBy from './ImageUsedBy.jsx';
 import { ImageRunModal } from './ImageRunModal.jsx';
 import { ImageSearchModal } from './ImageSearchModal.jsx';
-import ModalExample from './ImageDeleteModal.jsx';
+import { ImageDeleteModal } from './ImageDeleteModal.jsx';
 import ImageRemoveErrorModal from './ImageRemoveErrorModal.jsx';
 import * as client from './client.js';
 
@@ -73,18 +73,30 @@ class Images extends React.Component {
         }));
     }
 
-    handleRemoveImage() {
+    handleRemoveImage(tags, all) {
         const image = this.state.imageWillDelete.Id;
         this.setState({
             selectImageDeleteModal: false,
         });
-        client.delImage(this.state.imageWillDelete.isSystem, image, false)
-                .catch(ex => {
-                    this.imageRemoveErrorMsg = ex.message;
-                    this.setState({
-                        setImageRemoveErrorModal: true,
+        if (all)
+            client.delImage(this.state.imageWillDelete.isSystem, image, false)
+                    .catch(ex => {
+                        this.imageRemoveErrorMsg = ex.message;
+                        this.setState({
+                            setImageRemoveErrorModal: true,
+                        });
                     });
-                });
+        else {
+            // Call another untag once previous one resolved. Calling all at once can result in undefined behavior
+            const tag = tags.shift();
+            const i = tag.lastIndexOf(":");
+            client.untagImage(this.state.imageWillDelete.isSystem, image, tag.substring(0, i), tag.substring(i + 1, tag.length))
+                    .then(() => {
+                        if (tags.length > 0)
+                            this.handleRemoveImage(tags, all);
+                    })
+                    .catch(console.log);
+        }
     }
 
     handleForceRemoveImage() {
@@ -172,10 +184,10 @@ class Images extends React.Component {
         else if (this.props.textFilter.length > 0)
             emptyCaption = _("No images that match the current filter");
         const getNewImageAction = [
-            <Button variant="link" key="get-new-image-action"
+            <Button variant="secondary" key="get-new-image-action"
                     onClick={() => this.setState({ showSearchImageModal: true })}
                     className="pull-right"
-                    icon={<PlusCircleIcon />}>
+                    icon={<PlusIcon />}>
                 {_("Get new image")}
             </Button>
         ];
@@ -224,13 +236,6 @@ class Images extends React.Component {
             </span>;
         }
 
-        const imageDeleteModal =
-            <ModalExample
-                    selectImageDeleteModal={this.state.selectImageDeleteModal}
-                    imageWillDelete={this.state.imageWillDelete}
-                    handleCancelImageDeleteModal={this.handleCancelImageDeleteModal}
-                    handleRemoveImage={this.handleRemoveImage}
-            />;
         const imageRemoveErrorModal =
             <ImageRemoveErrorModal
                     setImageRemoveErrorModal={this.state.setImageRemoveErrorModal}
@@ -250,8 +255,12 @@ class Images extends React.Component {
                     actions={getNewImageAction}
                 />
                 {toggleIntermediate}
-                {imageDeleteModal}
                 {imageRemoveErrorModal}
+                {this.state.selectImageDeleteModal &&
+                <ImageDeleteModal
+                    imageWillDelete={this.state.imageWillDelete}
+                    handleCancelImageDeleteModal={this.handleCancelImageDeleteModal}
+                    handleRemoveImage={this.handleRemoveImage} /> }
                 {this.state.showRunImageModal &&
                 <ImageRunModal
                     close={() => this.setState({ showRunImageModal: undefined })}
@@ -261,6 +270,7 @@ class Images extends React.Component {
                     close={() => this.setState({ showSearchImageModal: false })}
                     downloadImage={this.downloadImage}
                     user={this.props.user}
+                    registries={this.props.registries}
                     userServiceAvailable={this.props.userServiceAvailable}
                     systemServiceAvailable={this.props.systemServiceAvailable} /> }
                 {this.state.imageDownloadInProgress && <div className='download-in-progress'> {_("Pulling")} {this.state.imageDownloadInProgress}... </div>}

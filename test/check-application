@@ -18,10 +18,10 @@ from machine_core import ssh_connection
 
 REGISTRIES_CONF="""
 [registries.search]
-registries = ['localhost:5000']
+registries = ['localhost:5000', 'localhost:6000']
 
 [registries.insecure]
-registries = ['localhost:5000']
+registries = ['localhost:5000', 'localhost:6000']
 """
 
 def checkImage(browser, name, owner):
@@ -34,18 +34,19 @@ def checkImage(browser, name, owner):
         return false;
         })""", name, owner)
 
-@testlib.nondestructive
 class TestApplication(testlib.MachineCase):
 
     def setUp(self):
         super().setUp()
+        self.machine.execute("systemctl stop podman.service; systemctl --now enable podman.socket")
+
         # backup/restore pristine podman state, so that tests can run on existing testbeds
         self.restore_dir("/var/lib/containers")
+        self.addCleanup(self.machine.execute, "systemctl stop podman.service")
+
         # HACK: sometimes podman leaks mounts
         self.addCleanup(self.machine.execute, "podman rm --force --all && "
             "findmnt --list -otarget | grep /var/lib/containers/. | xargs -r umount || true")
-
-        self.machine.execute("systemctl stop podman.service; systemctl --now enable podman.socket")
 
         # Create admin session
         self.machine.execute("""
@@ -76,9 +77,11 @@ class TestApplication(testlib.MachineCase):
         else:
             return self.admin_s.execute(cmd)
 
+    @testlib.nondestructive
     def testBasicSystem(self):
         self._testBasic(True)
 
+    @testlib.nondestructive
     def testBasicUser(self):
         self._testBasic(False)
 
@@ -321,11 +324,41 @@ class TestApplication(testlib.MachineCase):
         b.click(".btn-ctr-cancel-commit")
 
         # delete image busybox that hasn't been used
+        # First try to just untag and then remove with more tags
+        self.execute(auth, "podman tag docker.io/library/busybox:latest docker.io/library/busybox:1")
+        self.execute(auth, "podman tag docker.io/library/busybox:latest docker.io/library/busybox:2")
+        self.execute(auth, "podman tag docker.io/library/busybox:latest docker.io/library/busybox:3")
+        self.execute(auth, "podman tag docker.io/library/busybox:latest docker.io/library/busybox:4")
+
         b.wait_present(busybox_sel)
         b.click(busybox_sel + " td.pf-c-table__toggle button")
+
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:1")
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:2")
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:3")
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:4")
+
         b.click(busybox_sel + " + tr button.btn-delete")
+        self.assertTrue(b.get_checked("label:contains('docker.io/library/busybox:latest') input"))
+        b.set_checked("label:contains('docker.io/library/busybox:1') input", True)
+        b.set_checked("label:contains('docker.io/library/busybox:3') input", True)
+        b.set_checked("label:contains('docker.io/library/busybox:latest') input", False)
         b.click(".modal-dialog div #btn-img-delete")
         b.wait_not_present("modal-dialog div #btn-img-delete")
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:latest")
+        b.wait_in_text(busybox_sel + " + tr", "docker.io/library/busybox:2")
+        b.wait_not_in_text(busybox_sel + " + tr", "docker.io/library/busybox:1")
+        b.wait_not_in_text(busybox_sel + " + tr", "docker.io/library/busybox:3")
+
+        b.click(busybox_sel + " + tr button.btn-delete")
+        b.click("button:contains('select all')")
+        self.assertTrue(b.get_checked("label:contains('docker.io/library/busybox:latest') input"))
+        self.assertTrue(b.get_checked("label:contains('docker.io/library/busybox:2') input"))
+        self.assertTrue(b.get_checked("label:contains('docker.io/library/busybox:4') input"))
+        b.click(".modal-dialog div #btn-img-delete")
+        b.wait_not_present("modal-dialog div #btn-img-delete")
+        b.click(".modal-dialog div #btn-img-deleteerror")
+        b.wait_not_present("modal-dialog div #btn-img-deleteerror")
         b.wait_not_in_text("#containers-images", busybox_sel)
 
         # Check that we correctly show networking information
@@ -400,18 +433,21 @@ class TestApplication(testlib.MachineCase):
             # There should not be 'owner' selector
             b.wait_not_present("#containers-containers-owner")
 
+    @testlib.nondestructive
     def testDownloadImage(self):
         b = self.browser
         m = self.machine
         execute = self.execute
 
         def prepare():
-            # Create and start registry container
+            # Create and start registry containers
             self.execute(True, "podman run -d -p 5000:5000 --name registry registry:2")
+            self.execute(True, "podman run -d -p 6000:5000 --name registry_alt registry:2")
             # Add local insecure registry into registries conf
             self.execute(True, "echo \"{0}\" > /etc/containers/registries.conf && systemctl stop podman.service".format(REGISTRIES_CONF))
-            # Push busybox image to the local registry
+            # Push busybox image to the local registries
             self.execute(True, "podman tag busybox localhost:5000/my-busybox && podman push localhost:5000/my-busybox")
+            self.execute(True, "podman tag busybox localhost:6000/my-busybox && podman push localhost:6000/my-busybox")
             # Untag busybox image which duplicates the image we are about to download
             self.execute(True, "podman rmi -f busybox")
 
@@ -425,7 +461,7 @@ class TestApplication(testlib.MachineCase):
             def openDialog(self):
                 # Open get new image modal
                 b.click("header button:contains(Get new image)")
-                b.wait_present('div.modal-dialog div.modal-header h4.modal-title:contains("Search Image")')
+                b.wait_present('div.modal-dialog div.modal-header h4.modal-title:contains("Search for an image")')
                 b.wait_present("div.modal-dialog div.modal-footer button:contains(Download):disabled")
 
                 return self
@@ -433,6 +469,7 @@ class TestApplication(testlib.MachineCase):
             def fillDialog(self):
                 # Search for image specified with self.imageName and self.imageTag
                 b.click("#{0}".format(self.user))
+                b.set_val('#registry-select', "localhost:5000")
                 # HACK: Sometimes the value is not shown fully. FIXME
                 b.set_input_text("#search-image-dialog-name", self.imageName, value_check=False)
                 if self.imageTag:
@@ -468,11 +505,11 @@ class TestApplication(testlib.MachineCase):
                 checkImage(b, "localhost:5000/{0}:{1}".format(self.imageName, self.imageTag or "latest"), "system" if self.user == "system" else "admin")
 
                 # Find out this image ID
-                self.imageSha = execute(self.user == "system", "podman inspect --format '{{{{.Id}}}}' {0}:{1}".format(self.imageName, self.imageTag or "latest")).strip()
+                self.imageSha = execute(self.user == "system", "podman inspect --format '{{{{.Id}}}}' localhost:5000/{0}:{1}".format(self.imageName, self.imageTag or "latest")).strip()
 
                 return self
 
-            def deleteImage(self, force=False):
+            def deleteImage(self, force=False, another=None):
                 if self.imageTag:
                     imageTagSuffix =  ":" + self.imageTag
                 else:
@@ -488,6 +525,10 @@ class TestApplication(testlib.MachineCase):
                 # Click the delete icon on the image row
                 b.wait_present(sel + ' + tr button.btn-delete')
                 b.click(sel +' + tr button.btn-delete')
+
+                b.set_checked("label:contains('localhost:5000/{0}{1}') input".format(self.imageName, imageTagSuffix), True)
+                if another:
+                    b.set_checked("label:contains('{0}') input".format(another), True)
 
                 # Confirm deletion in the delete dialog
                 b.click(".modal-dialog #btn-img-delete")
@@ -505,6 +546,19 @@ class TestApplication(testlib.MachineCase):
         self.login_and_go("/podman", authorized=True, superuser=True)
         b.wait_present("#app")
 
+        # Test registries
+        b.click("header button:contains(Get new image)")
+        b.wait_present('div.modal-dialog div.modal-header h4.modal-title:contains("Search for an image")')
+        # HACK: Sometimes the value is not shown fully. FIXME
+        b.set_input_text("#search-image-dialog-name", "my-busybox", value_check=False)
+
+        b.wait_present("div.list-group .image-list-item label:contains('localhost:5000/my-busybox')")
+        b.wait_present("div.list-group .image-list-item label:contains('localhost:6000/my-busybox')")
+
+        b.set_val('#registry-select', "localhost:6000")
+        b.wait_not_present("div.list-group .image-list-item label:contains('localhost:5000/my-busybox')")
+        b.wait_present("div.list-group .image-list-item label:contains('localhost:6000/my-busybox')")
+
         dialog0 = DownloadImageDialog('my-busybox', user="system")
         dialog0.openDialog() \
               .fillDialog() \
@@ -516,9 +570,9 @@ class TestApplication(testlib.MachineCase):
               .fillDialog() \
               .selectImageAndDownload() \
               .expectDownloadSuccess()
-        dialog1.deleteImage(True)
+        dialog1.deleteImage(True, another="docker.io/library/busybox:latest")
 
-        dialog0.deleteImage()
+        dialog0.deleteImage(True)
 
         dialog = DownloadImageDialog('my-busybox', 'latest', user="system")
         dialog.openDialog() \
@@ -538,9 +592,11 @@ class TestApplication(testlib.MachineCase):
               .selectImageAndDownload() \
               .expectDownloadErrorForNonExistingTag()
 
+    @testlib.nondestructive
     def testLifecycleOperationsUser(self):
         self._testLifecycleOperations(False)
 
+    @testlib.nondestructive
     def testLifecycleOperationsSystem(self):
         self._testLifecycleOperations(True)
 
@@ -563,6 +619,11 @@ class TestApplication(testlib.MachineCase):
         b.wait_present("#containers-containers")
         b.wait_present('#containers-containers tr:contains("swamped-crate")')
         b.click('#containers-containers tbody tr:contains("busybox:latest") td.pf-c-table__toggle button')
+
+        if not auth:
+            # Checkpoint/restore is not supported on user containers yet - the related buttons should not be shown
+            # Check that the restore option is not present (i.e. start is a regular button)
+            b.wait_present('#containers-containers tbody tr:contains("busybox:latest") + tr button.pf-c-button:contains(Start)')
 
         # Start the container
         b.click('#containers-containers tbody tr:contains("busybox:latest") + tr button:contains(Start)')
@@ -614,6 +675,10 @@ class TestApplication(testlib.MachineCase):
         # Stop the container
         b.wait_present('#containers-containers tr:contains("busybox:latest")')
         b.click('#containers-containers tbody tr:contains("busybox:latest") + tr button:contains(Stop) + button')
+        if not auth:
+            # Check that the checkpoint option is not present for rootless
+            b.wait_visible('#containers-containers tr:contains("busybox:latest") + tr a:contains("Force Stop")')
+            b.wait_not_present('#containers-containers tr:contains("busybox:latest") + tr #Stop-dropdown ul li:has(a:contains(Checkpoint))')
         b.click('#containers-containers tbody tr:contains("busybox:latest") + tr ul.pf-c-dropdown__menu li a:contains(Force Stop)')
 
         self.check_container(container_sha, auth, ['swamped-crate', 'busybox:latest', 'sh'])
@@ -621,6 +686,97 @@ class TestApplication(testlib.MachineCase):
         b.wait_text("#containers-containers tbody tr:contains('busybox:latest') > td:nth-child(3)", "")
         b.wait_text("#containers-containers tbody tr:contains('busybox:latest') > td:nth-child(4)", "")
 
+    def testCheckpointRestoreSystem(self):
+        b = self.browser
+        m = self.machine
+
+        # Set machine to cgroup1 and reboot
+        self.execute(True, 'grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=0"; reboot')
+        m.wait_reboot()
+
+        self.login_and_go("/podman", authorized=True, superuser=True)
+        b.wait_present("#app")
+        self.filter_containers('all')
+
+        # Run a container
+        self.execute(True, "podman run -dit --name swamped-crate busybox sh; podman stop swamped-crate")
+        b.wait(lambda: self.execute(True, "podman ps --all | grep -e swamped-crate -e Exited"))
+        b.click('#containers-containers tbody tr:contains("busybox:latest") td.pf-c-table__toggle button')
+
+        # Check that the restore option is not present (i.e. start is a regular button)
+        b.wait_present('#containers-containers tbody tr:contains("busybox:latest") + tr button.pf-c-button:contains(Start)')
+
+        # Start the container
+        b.click('#containers-containers tbody tr:contains("busybox:latest") + tr button:contains(Start)')
+        b.wait_in_text('#containers-containers tr:contains(swamped-crate)', 'running')
+
+        # Checkpoint the container
+        b.click('#containers-containers tr:contains("busybox:latest") + tr button:contains(Stop) + button')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr #Stop-dropdown ul li:has(a:contains(Checkpoint))')
+        b.set_checked('.modal-dialog input#checkpoint-dialog-keep', True)
+        b.set_checked('.modal-dialog input#checkpoint-dialog-tcpEstablished', True)
+        b.set_checked('.modal-dialog input#checkpoint-dialog-ignoreRootFS', True)
+        b.click('.modal-dialog button:contains(Checkpoint)')
+        b.wait(lambda: b.text('#containers-containers tr:contains(swamped-crate) td:nth-of-type(6)') in ['stopped', 'exited'])
+
+        # Restore the container
+        b.wait_present('#containers-containers tr:contains("busybox:latest")')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr button:contains(Start) + button')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr #Start-dropdown ul li:has(a:contains(Restore))')
+        b.set_checked('.modal-dialog input#restore-dialog-keep', True)
+        b.set_checked('.modal-dialog input#restore-dialog-tcpEstablished', True)
+        b.set_checked('.modal-dialog input#restore-dialog-ignoreStaticIP', True)
+        b.set_checked('.modal-dialog input#restore-dialog-ignoreStaticMAC', True)
+        b.click('.modal-dialog button:contains(Restore)')
+        b.wait(lambda: b.text('#containers-containers tr:contains(swamped-crate) td:nth-of-type(6)') == 'running')
+
+        # Checkpoint the container without stopping
+        b.wait_present('#containers-containers tr:contains("busybox:latest")')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr button:contains(Stop) + button')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr #Stop-dropdown ul li:has(a:contains(Checkpoint))')
+        b.set_checked('.modal-dialog input#checkpoint-dialog-leaveRunning', True)
+        b.click('.modal-dialog button:contains(Checkpoint)')
+        b.wait_not_present('.modal_dialog')
+
+        # Stop the container
+        b.wait_present('#containers-containers tr:contains("busybox:latest")')
+        b.click('#containers-containers tbody tr:contains("busybox:latest") + tr button:contains(Stop) + button')
+        b.click('#containers-containers tbody tr:contains("busybox:latest") + tr ul.pf-c-dropdown__menu li a:contains(Force Stop)')
+        b.wait(lambda: b.text('#containers-containers tr:contains(swamped-crate) td:nth-of-type(6)') in ['stopped', 'exited'])
+
+        # Restore the container
+        b.wait_present('#containers-containers tr:contains("busybox:latest")')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr button:contains(Start) + button')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr #Start-dropdown ul li:has(a:contains(Restore))')
+        b.click('.modal-dialog button:contains(Restore)')
+        b.wait(lambda: b.text('#containers-containers tr:contains(swamped-crate) td:nth-of-type(6)') == 'running')
+
+    @testlib.nondestructive
+    def testCheckpointRestoreSystemCrun(self):
+        # With crun (CgroupsV2) checkpoint doesn't work yet
+        b = self.browser
+        m = self.machine
+
+        self.login_and_go("/podman", authorized=True, superuser=True)
+        b.wait_present("#app")
+        self.filter_containers('all')
+
+        # Run a container
+        self.execute(True, "podman run -dit --name swamped-crate busybox sh")
+        b.wait(lambda: self.execute(True, "podman ps --all | grep -e swamped-crate"))
+        b.click('#containers-containers tbody tr:contains("busybox:latest") td.pf-c-table__toggle button')
+
+        # Checkpoint the container
+        b.click('#containers-containers tr:contains("busybox:latest") + tr button:contains(Stop) + button')
+        b.click('#containers-containers tr:contains("busybox:latest") + tr #Stop-dropdown ul li:has(a:contains(Checkpoint))')
+        b.set_checked('.modal-dialog input#checkpoint-dialog-keep', True)
+        b.set_checked('.modal-dialog input#checkpoint-dialog-tcpEstablished', True)
+        b.set_checked('.modal-dialog input#checkpoint-dialog-ignoreRootFS', True)
+        b.click('.modal-dialog button:contains(Checkpoint)')
+        b.wait_not_present('.modal_dialog')
+        b.wait_in_text('.pf-c-alert__description', 'Configured runtime does not support checkpoint/restore')
+
+    @testlib.nondestructive
     def testNotRunning(self):
         b = self.browser
         m = self.machine
@@ -735,9 +891,11 @@ class TestApplication(testlib.MachineCase):
         self.allow_authorize_journal_messages()
         self.allow_journal_messages(".*podman/podman.sock/.*: couldn't connect:.*")
 
+    @testlib.nondestructive
     def testRunImageSystem(self):
         self._testRunImage(True)
 
+    @testlib.nondestructive
     def testRunImageUser(self):
         self.allow_authorize_journal_messages()
         self._testRunImage(False)
@@ -934,10 +1092,14 @@ class TestApplication(testlib.MachineCase):
         b.set_input_text("#run-image-dialog-name", "busybox-without-publish")
 
         # Set up command line
-        b.set_input_text('#run-image-dialog-command', '/bin/sh')
+        b.set_input_text('#run-image-dialog-command', '/bin/sh -c "sleep 1000m"')
+
+        # Run without tty, console should be able to `exec`
+        b.set_checked("#run-image-dialog-tty", False)
 
         b.click('div.modal-footer button:contains("Run")')
         b.wait_not_present("div.modal-dialog")
+
         b.wait_present('#containers-containers tr:contains("busybox-without-publish")')
         b.click('#containers-containers tbody tr:contains("busybox-without-publish") td.pf-c-table__toggle button')
         b.wait_present('#containers-containers tbody tr:contains("busybox-without-publish") + tr dt:contains("Ports")')

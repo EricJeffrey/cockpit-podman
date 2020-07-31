@@ -39,7 +39,7 @@ function podmanMonitor(name, method, args, callback, system) {
 
 export function streamEvents(system, callback) {
     return new Promise((resolve, reject) => {
-        podmanMonitor("events", "GET", {}, callback, system)
+        podmanMonitor("libpod/events", "GET", {}, callback, system)
                 .then(reply => resolve(JSON.parse(reply)))
                 .catch(reject);
     });
@@ -47,7 +47,7 @@ export function streamEvents(system, callback) {
 
 export function getInfo(system) {
     return new Promise((resolve, reject) => {
-        podmanCall("info", "GET", {}, system)
+        podmanCall("libpod/info", "GET", {}, system)
                 .then(reply => resolve(JSON.parse(reply)))
                 .catch(reject);
     });
@@ -121,13 +121,34 @@ export function postContainer(system, action, id, args) {
     });
 }
 
-export function resizeContainersTTY(system, id, width, height) {
+export function execContainer(system, id) {
+    const args = {
+        AttachStderr: true,
+        AttachStdout: true,
+        AttachStdin: true,
+        Tty: true,
+        Cmd: ["/bin/sh"],
+    };
+
+    return new Promise((resolve, reject) => {
+        podmanCall("libpod/containers/" + id + "/exec", "POST", {}, system, JSON.stringify(args))
+                .then(reply => resolve(JSON.parse(reply)))
+                .catch(reject);
+    });
+}
+
+export function resizeContainersTTY(system, id, exec, width, height) {
     const args = {
         h: height,
         w: width,
     };
+
+    let point = "containers/";
+    if (!exec)
+        point = "exec/";
+
     return new Promise((resolve, reject) => {
-        podmanCall("libpod/containers/" + id + "/resize", "POST", args, system)
+        podmanCall("libpod/" + point + id + "/resize", "POST", args, system)
                 .then(resolve)
                 .catch(reject);
     });
@@ -184,6 +205,18 @@ export function delImage(system, id, force) {
         };
         podmanCall("libpod/images/" + id, "DELETE", options, system)
                 .then(reply => resolve(JSON.parse(reply)))
+                .catch(reject);
+    });
+}
+
+export function untagImage(system, id, repo, tag) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            repo: repo,
+            tag: tag
+        };
+        podmanCall("libpod/images/" + id + "/untag", "POST", options, system)
+                .then(resolve)
                 .catch(reject);
     });
 }
