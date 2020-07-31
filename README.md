@@ -13,3 +13,5 @@ For now you can do basic image and container tasks for both system and user cont
 
  - This project is based on the [Cockpit Starter Kit](https://github.com/cockpit-project/starter-kit).
    See [Starter Kit Intro](http://cockpit-project.org/blog/cockpit-starter-kit.html) for details.
+
+**Note**: This branch has been modified to fit my own OS and some UI components may not work on your machine.
